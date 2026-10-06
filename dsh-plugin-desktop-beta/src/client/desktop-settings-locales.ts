@@ -120,6 +120,8 @@ export const zh = {
   turnFailure: '本轮任务失败',
   jobCompletion: '后台任务完成',
   jobFailure: '后台任务失败',
+  scheduleCompletion: '自动化任务完成',
+  scheduleFailure: '自动化任务失败',
 } as const
 
 export type DesktopSettingsLocaleKey = keyof typeof zh
@@ -244,4 +246,6 @@ export const en: Record<DesktopSettingsLocaleKey, string> = {
   turnFailure: 'Current turn failed',
   jobCompletion: 'Background job completed',
   jobFailure: 'Background job failed',
+  scheduleCompletion: 'Automation task completed',
+  scheduleFailure: 'Automation task failed',
 }

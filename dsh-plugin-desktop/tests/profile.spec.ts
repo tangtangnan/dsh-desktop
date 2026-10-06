@@ -28,6 +28,7 @@ import {
   readDesktopShellMode,
   resolveDesktopSettingsDocument,
   shippedSkillRoot,
+  UPSTREAM_PRODUCT_ANALYTICS_ROW_IDS,
   validateDshMarketBundlePatches,
 } from '../src/profile.ts'
 import { setDesktopProfileBundleSelected } from '../src/desktop-plugins.ts'
@@ -685,6 +686,21 @@ virtualStoreDirMaxLength: 60
     }])).toThrow('must insert exactly the canonical dsh-market row')
   })
 
+  it('keeps upstream Desktop product analytics off even when a user patch enables it', () => {
+    const home = temporaryHome()
+    writeFileSync(join(ensureDesktopProfile(home), 'cordis.patch.yml'), [
+      '- id: product-analytics',
+      '  disabled: false',
+      '',
+    ].join('\n'))
+
+    const rows = composeEntries([prepareDesktopProfile(undefined, home, 'darwin').patches])
+
+    for (const id of UPSTREAM_PRODUCT_ANALYTICS_ROW_IDS) {
+      expect(rows.find(row => row.id === id)).toEqual(expect.objectContaining({ disabled: true }))
+    }
+  })
+
   it('boots a selected Web profile without overriding its compatibility UI rows', () => {
     const home = temporaryHome()
     const webDir = join(home, 'profiles', 'web')
@@ -817,6 +833,33 @@ virtualStoreDirMaxLength: 60
     expect(pending.profile.layers.map(layer => layer.packageName))
       .toEqual(prepareDesktopProfile(undefined, home, 'darwin').profile.layers.map(layer => layer.packageName))
     expect(prepareDesktopProfile(undefined, home, 'darwin').mode).toBe('compatibility')
+  })
+
+  it.each([
+    ['compatibility', 'extended', false],
+    ['extended', 'compatibility', true],
+    ['advanced', 'compatibility', true],
+  ] as const)('keeps the %s generation\'s layout rows after the Profile switches to %s', (running, stored, disabled) => {
+    // First-run Setup and the mode picker both save the mode into the patch layer
+    // while the window keeps its renderer, and the save hot-reloads the Profile.
+    // Recomposing the layout rows from the stored mode dropped (or restored)
+    // `ui-layout` under a page built for the other layout owner, so the client
+    // plugins waited on a layout service forever and the window went to recovery.
+    const home = temporaryHome()
+    writeDesktopShellPreferences(home, [`mode: ${stored}`])
+
+    const reloaded = prepareDesktopProfile(undefined, home, 'win32', undefined, undefined, undefined, {
+      generationMode: running,
+    })
+    const rows = composeEntries([reloaded.patches])
+
+    expect(reloaded.mode).toBe(stored)
+    expect(rows.find(row => row.id === 'desktop-shell')?.config).toEqual(expect.objectContaining({ mode: stored }))
+    expect(rows.find(row => row.id === 'ui-layout')?.disabled ?? false).toBe(disabled)
+    expect(rows.find(row => row.id === 'ui-sidebar')?.disabled ?? false).toBe(false)
+    // The next generation composes from what was saved.
+    const next = composeEntries([prepareDesktopProfile(undefined, home, 'win32').patches])
+    expect(next.find(row => row.id === 'ui-layout')?.disabled ?? false).toBe(stored !== 'compatibility')
   })
 
   it('renames its own legacy settings sections to the entry ids 0.1.7 imports by', () => {

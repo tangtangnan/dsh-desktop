@@ -1,6 +1,6 @@
-/** Exercise the actual 0.1.7-rc.1 Host, credentials, Market routes and AA manifest without Electron UI. */
+/** Exercise the actual 0.2.1-alpha.1 Host, credentials, Market routes and AA manifest without Electron UI. */
 import assert from 'node:assert/strict'
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { delimiter, join } from 'node:path'
@@ -27,7 +27,7 @@ const pnpmInvocation = { command: executable, args: ['--expose-internals', bundl
 async function boot(name) {
   host = new DesktopHostProcess(executable, root, manager.directory(name), undefined,
     { ...process.env, DSH_HOME: home, DSH_TELEMETRY_DISABLED: '1' }, undefined, undefined, undefined,
-    join(root, 'lib', 'host.js'), () => { restartRequests++ })
+    join(root, 'scripts', 'fixtures', 'isolated-user-host.mjs'), () => { restartRequests++ })
   let timer
   const ready = await Promise.race([
     host.start(), new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('Next Host smoke exceeded 60 seconds')), 60_000) }),
@@ -66,6 +66,8 @@ try {
   const manifest = JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8'))
   assert.ok(manifest.dsh.profile.bundles.includes('fixture-next-plugin'), 'Official plugin operations must activate the bundle')
   let { origin, cookie } = await boot('desktop')
+  assert.ok(existsSync(join(home, '.agents-anywhere', 'dsh-bridge-next')),
+    'AA must resolve its default shared state inside the smoke user home')
   const rpc = async (method, args = {}) => {
     const rpcId = crypto.randomUUID()
     const response = await fetch(`${origin}/api/pluginManager/${method}`, {
@@ -78,6 +80,33 @@ try {
   }
   // The official overview discovers installation-owned bundles from direct
   // dependencies, even when their packages are already present transitively.
+  const officialRows = await rpc('listPlugins')
+  for (const name of ['@deepseek-ai/dsh-llm-deepseek-api-key', '@deepseek-ai/dsh-llm-deepseek-account',
+    '@deepseek-ai/dsh-client-shortcuts', '@deepseek-ai/dsh-client-ui-shortcuts']) {
+    assert.ok(officialRows.some(row => row.moduleName === name && row.enabled), `Web composition is missing ${name}`)
+  }
+  // Upstream retired the Scheduled Tasks bundle: the Web composition mounts
+  // Schedule itself and the clock reading belongs to the agent presets.
+  const scheduleModules = ['@deepseek-ai/dsh-schedule', '@deepseek-ai/dsh-client-ui-schedule']
+  for (const name of scheduleModules) {
+    const row = officialRows.find(row => row.moduleName === name)
+    assert.equal(row?.enabled, true, `Web composition must mount ${name}: ${JSON.stringify(row)}`)
+    assert.equal(row?.fiberPhase, 'active', JSON.stringify(row))
+  }
+  const retiredSchedule = '@deepseek-ai/dsh-experimental-schedule-bundle'
+  assert.equal((await rpc('listBundles')).some(bundle => bundle.name === retiredSchedule), false,
+    `Official Plugins overview must not offer the retired ${retiredSchedule}`)
+  for (const enabled of [false, true]) {
+    const row = (await rpc('listPlugins')).find(row => row.moduleName === scheduleModules[0])
+    const result = await rpc('setPluginEnabled', { id: row.entryId, enabled })
+    assert.equal(result.application, 'applied', JSON.stringify(result))
+    await stop()
+    ;({ origin, cookie } = await boot('desktop'))
+    const restarted = (await rpc('listPlugins')).find(row => row.moduleName === scheduleModules[0])
+    assert.equal(restarted?.enabled, enabled, `Schedule switch must survive restart: ${JSON.stringify(restarted)}`)
+    if (enabled) assert.equal(restarted?.fiberPhase, 'active', JSON.stringify(restarted))
+  }
+  console.log('verify-host: Web-composed Schedule switch and restart persistence passed')
   const availableBundles = await rpc('listBundles')
   // dsh 0.1.7 deleted `-web-profile` and merged its `ui-agent-team` row into `-profile`.
   for (const [name, rowIds] of [
@@ -97,6 +126,7 @@ try {
     assert.ok(bundle, JSON.stringify(bundle))
     assert.equal(bundle.optional, true)
     assert.equal(bundle.removable, false)
+    assert.equal(bundle.error, undefined, JSON.stringify(bundle))
     const result = await rpc('setBundleEnabled', { name, enabled: false })
     assert.equal(result.application, 'applied', JSON.stringify(result))
     assert.equal((await rpc('listBundles')).find(row => row.name === name)?.enabled, false)
@@ -256,9 +286,18 @@ try {
   assert.equal(recoveredHtml.includes('@agents-anywhere/dsh-bridge-next'), false)
   assert.ok(recoveredHtml.includes('"id":"dsh-desktop-next"'), 'Recovery must retain basic window controls')
   await stop()
-  manager.create('work'); manager.select('work')
+  manager.create('work')
+  assert.deepEqual(manager.features('work'), { remoteControl: false, market: false }, 'New Profiles must leave markets off')
+  manager.select('work')
   const switched = await boot(manager.active)
+  ;({ origin, cookie } = switched)
   assert.equal(manager.active, 'work')
+  for (const name of ['dsh-community-market', 'dshmarket']) {
+    const row = (await rpc('listBundles')).find(bundle => bundle.name === name)
+    assert.ok(row && !row.enabled && row.readOnlyReason === undefined, `${name} must remain selectable while off`)
+  }
+  const enableMarket = await rpc('setBundleEnabled', { name: 'dsh-community-market', enabled: true })
+  assert.equal(enableMarket.application, 'applied', JSON.stringify(enableMarket))
   const switchedState = await fetch(`${switched.origin}/api/community-market/state`, { headers: { cookie: switched.cookie } })
   assert.equal(switchedState.status, 200)
   await switchedState.body?.cancel()
@@ -289,7 +328,7 @@ try {
     await stop()
     console.log('Onboarding Cua native provider activation and teardown passed without capturing screens, sending input or prompting for OS permissions.')
   }
-  console.log(`Next Host smoke passed (${process.argv.includes('--electron') ? 'Electron Node mode' : 'Node'}): authenticated 0.1.7-rc.1 Web, exclusive market selection and independent AA persisted, official row toggles, dshmarket offline install and cross-market removal, official install/remove with a freshly published locked dependency, native dshmarket update origin gate, graceful shutdown, recovery boot and profile switch.`)
+  console.log(`Next Host smoke passed (${process.argv.includes('--electron') ? 'Electron Node mode' : 'Node'}): authenticated 0.2.1-alpha.1 Web, exclusive market selection and independent AA persisted, official row toggles, dshmarket offline install and cross-market removal, official install/remove with a freshly published locked dependency, native dshmarket update origin gate, graceful shutdown, recovery boot and profile switch.`)
 } finally {
   await runner?.dispose()
   await host?.stop()

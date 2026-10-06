@@ -645,6 +645,116 @@ describe('desktop Host plugin', () => {
     expect(harness.restart).toHaveBeenCalledOnce()
   })
 
+  it('saves first-run Setup through the settings scopes without its own native restart prompt', async () => {
+    vi.useFakeTimers()
+    const harness = createHarness('darwin')
+    apply(harness.ctx, harness.config)
+    harness.restart.mockImplementation(() => new Promise<void>(() => {}))
+    const notifications = {
+      enabled: true,
+      notifyOnTurnCompletion: false,
+      notifyOnTurnFailure: true,
+      notifyOnJobCompletion: false,
+      notifyOnJobFailure: true,
+      notifyOnScheduleCompletion: true,
+      notifyOnScheduleFailure: true,
+    }
+
+    await harness.shell()?.applySetupSettings?.({
+      mode: 'extended',
+      macosMaterial: 'off',
+      windowsMaterial: 'off',
+      openBrowser: false,
+      networkExposure: 'loopback',
+      notifications,
+    })
+
+    expect(harness.update).toHaveBeenCalledWith(DESKTOP_SETTINGS_ENTRY_ID, {
+      mode: 'extended',
+      macosMaterial: 'off',
+      windowsMaterial: 'off',
+      openBrowser: false,
+      networkExposure: 'loopback',
+    })
+    expect(harness.update).toHaveBeenCalledWith('desktop-notifications', notifications)
+
+    // Setup's continuation owns the restart that applies its own choice.
+    await harness.notify({ mode: 'extended', macosMaterial: 'off' })
+    await vi.runAllTimersAsync()
+    expect(harness.restart).not.toHaveBeenCalled()
+
+    // A later, different choice still asks for its own restart.
+    await harness.notify({ mode: 'advanced' })
+    await vi.runAllTimersAsync()
+    expect(harness.restart).toHaveBeenCalledOnce()
+  })
+
+  it('asks again when the user returns to the Setup mode after leaving it', async () => {
+    vi.useFakeTimers()
+    const harness = createHarness()
+    apply(harness.ctx, harness.config)
+    harness.restart.mockImplementation(() => new Promise<void>(() => {}))
+    // Only the notifications half fails; the saved mode keeps its own quiet restart.
+    harness.update.mockImplementation(async (id: unknown) => {
+      if (id === 'desktop-notifications') throw new Error('refused')
+    })
+
+    await expect(harness.shell()?.applySetupSettings?.({
+      mode: 'extended',
+      macosMaterial: 'transparent',
+      windowsMaterial: 'off',
+      openBrowser: false,
+      networkExposure: 'loopback',
+      notifications: {
+        enabled: false,
+        notifyOnTurnCompletion: false,
+        notifyOnTurnFailure: false,
+        notifyOnJobCompletion: false,
+        notifyOnJobFailure: false,
+        notifyOnScheduleCompletion: false,
+        notifyOnScheduleFailure: false,
+      },
+    })).rejects.toThrow('refused')
+    await harness.notify({ mode: 'extended' })
+    await vi.runAllTimersAsync()
+    expect(harness.restart).not.toHaveBeenCalled()
+
+    // Back to the running mode, then Setup's mode again from the mode picker.
+    await harness.notify({ mode: 'compatibility' })
+    await harness.notify({ mode: 'extended' })
+    await vi.runAllTimersAsync()
+    expect(harness.restart).toHaveBeenCalledOnce()
+  })
+
+  it('keeps the restart prompt when first-run Setup could not save its choice', async () => {
+    vi.useFakeTimers()
+    const harness = createHarness()
+    apply(harness.ctx, harness.config)
+    harness.restart.mockImplementation(() => new Promise<void>(() => {}))
+    harness.update.mockRejectedValueOnce(new Error('refused'))
+
+    await expect(harness.shell()?.applySetupSettings?.({
+      mode: 'extended',
+      macosMaterial: 'transparent',
+      windowsMaterial: 'off',
+      openBrowser: false,
+      networkExposure: 'loopback',
+      notifications: {
+        enabled: false,
+        notifyOnTurnCompletion: false,
+        notifyOnTurnFailure: false,
+        notifyOnJobCompletion: false,
+        notifyOnJobFailure: false,
+        notifyOnScheduleCompletion: false,
+        notifyOnScheduleFailure: false,
+      },
+    })).rejects.toThrow('refused')
+
+    await harness.notify({ mode: 'extended' })
+    await vi.runAllTimersAsync()
+    expect(harness.restart).toHaveBeenCalledOnce()
+  })
+
   it('hot-applies browser and LAN access but restarts when a custom mode withdraws them', async () => {
     vi.useFakeTimers()
     const harness = createHarness()

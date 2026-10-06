@@ -66,7 +66,7 @@ describe('electronPlatformStrategy', () => {
 
     expect(strategy.platform).toBe('darwin')
     expect(strategy.updateDownloadPlatform).toBe('darwin')
-    expect(strategy.canPickDirectory).toBe(false)
+    expect(strategy.canPickDirectory).toBe(true)
     expect(strategy.canToggleShellMode).toBe(true)
     expect(strategy.hidesWindowOnClose).toBe(true)
 

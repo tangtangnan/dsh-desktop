@@ -10,6 +10,7 @@ import type {
   MacosWindowMaterial,
   PersistedWindowsWindowMaterial,
 } from './window-material.ts'
+import type { DesktopSetupWizardSettings } from './setup-wizard-settings.ts'
 
 /** Electron platforms supported by the DSH Desktop native adapter. */
 export type DesktopPlatform = 'darwin' | 'win32' | 'linux'
@@ -170,6 +171,12 @@ export interface DesktopShellSpec extends DesktopWindowConfig {
   requestQuit(code: number): void
   /** Persist another mode through the registered desktop settings scope. */
   requestModeChange(mode: DesktopShellMode): Promise<void>
+  /**
+   * Persist first-run Setup choices through the registered settings scopes, the
+   * same Profile patch layer the mode picker writes. The running generation keeps
+   * its presentation; Setup's own continuation offers the restart that applies it.
+   */
+  applySetupSettings?(settings: DesktopSetupWizardSettings): Promise<void>
   readRemoteControl?(): Promise<boolean>
   enableRemoteControl?(): Promise<void>
 }

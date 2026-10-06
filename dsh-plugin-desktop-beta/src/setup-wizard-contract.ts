@@ -14,6 +14,8 @@ export interface DesktopSetupWizardNotifications {
   readonly notifyOnTurnFailure: boolean
   readonly notifyOnJobCompletion: boolean
   readonly notifyOnJobFailure: boolean
+  readonly notifyOnScheduleCompletion: boolean
+  readonly notifyOnScheduleFailure: boolean
 }
 
 /** Every value the launcher needs to persist after Setup completes. */
@@ -28,7 +30,7 @@ export interface DesktopSetupWizardSelection {
   readonly notifications: DesktopSetupWizardNotifications
 }
 
-/** Fixed capabilities and current values supplied before the Host is started. */
+/** Fixed capabilities and current values supplied when Desktop setup is opened. */
 export interface DesktopSetupWizardInput extends DesktopSetupWizardSelection {
   readonly appVersion: string
   readonly profileName: string
@@ -62,6 +64,8 @@ const NOTIFICATION_KEYS = Object.freeze([
   'notifyOnTurnFailure',
   'notifyOnJobCompletion',
   'notifyOnJobFailure',
+  'notifyOnScheduleCompletion',
+  'notifyOnScheduleFailure',
 ] as const)
 
 function isObject(value: unknown): value is Record<string, unknown> {
